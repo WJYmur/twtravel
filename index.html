@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>國旅特約商店查詢系統</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/RecordRTC/5.6.2/RecordRTC.min.js"></script>
+    <style>
+        /* 載入 Google 字體 / Load Google Fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700&display=swap');
+        body { font-family: 'Noto Sans TC', sans-serif; background-color: #f3f4f6; }
+        
+        /* 語音按鈕脈衝動畫 / Pulse animation for voice button */
+        .voice-pulse { animation: pulse 1.5s infinite; }
+        @keyframes pulse {
+            0% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { transform: scale(1.1); opacity: 0.8; box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+            100% { transform: scale(1); opacity: 1; box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+        
+        /* 彈出視窗動畫 / Pop-up animation */
+        @keyframes popUp {
+            0% { transform: scale(0.95) translateY(10px); opacity: 0; }
+            100% { transform: scale(1) translateY(0); opacity: 1; }
+        }
+        .animate-pop-up { animation: popUp 0.2s ease-out forwards; }
+        
+        /* 地圖區塊互動樣式 / Map interactive styles */
+        .county-path { transition: fill 0.2s ease-in-out, transform 0.2s; cursor: pointer; }
+        .county-path:hover { fill: #2563eb !important; transform: translateY(-2px); }
+        .inset-group { cursor: pointer; }
+        .inset-group rect { transition: fill 0.2s, stroke 0.2s; }
+        .inset-group:hover rect { fill: #eff6ff; stroke: #60a5fa; }
+        
+        /* 隱藏滾動條 / Hide scrollbar */
+        .scrollbar-hide::-webkit-scrollbar { display: none; }
+    </style>
+</head>
+<body class="pb-20">
+
+    <div id="mapModal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-75 backdrop-blur-sm z-[160] flex items-center justify-center p-4 transition-opacity">
+        <div class="bg-white rounded-3xl w-full max-w-3xl overflow-hidden shadow-2xl relative flex flex-col h-[75vh] md:h-[85vh] animate-pop-up">
+            <div class="p-4 md:p-5 border-b border-gray-100 flex justify-between items-center bg-gray-50 shrink-0">
+                <div class="pr-4">
+                    <h3 id="mapModalTitle" class="text-lg md:text-xl font-bold text-gray-800 line-clamp-1">載入中...</h3>
+                    <p id="mapModalAddr" class="text-sm text-gray-500 mt-1 line-clamp-1"></p>
+                </div>
+                <button onclick="window.closeMapModal()" class="text-gray-400 hover:text-red-500 bg-white hover:bg-red-50 rounded-full p-2.5 transition shadow-sm border border-gray-200 shrink-0">
+                    <i class="fas fa-times text-xl w-5 h-5 flex items-center justify-center"></i>
+                </button>
+            </div>
+            <div class="relative flex-1 bg-gray-100 w-full h-full">
+                <div id="mapIframeLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-gray-50 z-10">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-500 mb-3"></div>
+                    <span class="text-gray-500 font-medium">地圖載入中...</span>
+                </div>
+                <iframe id="googleMapIframe" class="w-full h-full border-0" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+            </div>
+        </div>
+    </div>
+    
+    <div id="mapTooltip" class="absolute opacity-0 bg-gray-900 text-white px-3 py-1.5 rounded-lg text-sm font-bold pointer-events-none z-[120] transition-opacity duration-150 shadow-xl" style="left: 0; top: 0;"></div>
+
+    <div id="mapView" class="min-h-screen flex flex-col block">
+        <header class="bg-blue-600 text-white p-4 shadow-lg sticky top-0 z-50">
+            <div class="max-w-4xl mx-auto flex justify-center items-center">
+                <h1 class="text-xl font-bold flex items-center">
+                    <i class="fas fa-map-marked-alt mr-2"></i> 點選縣市開始查詢
+                </h1>
+            </div>
+        </header>
+        
+        <main class="flex-1 max-w-4xl mx-auto p-4 w-full flex flex-col items-center">
+            <p class="text-gray-600 text-center mb-4 font-medium">請在地圖上點擊或從下方列表選擇縣市</p>
+            
+            <div id="taiwanMap" class="w-full max-w-3xl h-[70vh] md:h-[75vh] bg-white rounded-3xl shadow-md border border-blue-100 overflow-hidden relative flex items-center justify-center mb-6">
+                <div id="mapLoading" class="absolute inset-0 flex flex-col items-center justify-center bg-white z-10">
+                    <div class="animate-spin rounded-full h-12 w-12 border-b-4 border-blue-600 mb-3"></div>
+                    <span class="text-gray-500 font-medium">地圖載入中...</span>
+                </div>
+            </div>
+
+            <div class="w-full max-w-4xl bg-white rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.04)] p-6 md:p-8 border border-gray-100 mb-4 transition-all">
+                <div class="flex items-center mb-6 border-b border-gray-100 pb-4">
+                    <div class="bg-blue-50 text-blue-600 w-10 h-10 rounded-xl flex items-center justify-center mr-3 shadow-sm border border-blue-100">
+                        <i class="fas fa-th-large text-lg"></i>
+                    </div>
+                    <span class="text-xl font-bold text-gray-800 tracking-wide">全台縣市快速選擇</span>
+                </div>
+                
+                <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 md:gap-5">
+                    <div class="flex flex-col bg-blue-50/60 p-4 rounded-2xl border border-blue-100/50">
+                        <div class="flex items-center mb-4">
+                            <span class="text-xs font-bold text-blue-600 bg-white px-3 py-1.5 rounded-lg border border-blue-100 shadow-sm"><i class="fas fa-cloud-sun mr-1.5"></i>北部地區</span>
+                            <div class="h-px bg-gradient-to-r from-blue-200 to-transparent flex-1 ml-3"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <button onclick="window.navigateToSearch('基隆市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-blue-300 hover:text-blue-600 hover:-translate-y-1 transition-all">基隆</button>
+                            <button onclick="window.navigateToSearch('台北市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-blue-300 hover:text-blue-600 hover:-translate-y-1 transition-all">台北</button>
+                            <button onclick="window.navigateToSearch('新北市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-blue-300 hover:text-blue-600 hover:-translate-y-1 transition-all">新北</button>
+                            <button onclick="window.navigateToSearch('桃園市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-blue-300 hover:text-blue-600 hover:-translate-y-1 transition-all">桃園</button>
+                            <button onclick="window.navigateToSearch('新竹市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-blue-300 hover:text-blue-600 hover:-translate-y-1 transition-all">新竹市</button>
+                            <button onclick="window.navigateToSearch('新竹縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-blue-300 hover:text-blue-600 hover:-translate-y-1 transition-all">新竹縣</button>
+                            <button onclick="window.navigateToSearch('宜蘭縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-blue-300 hover:text-blue-600 hover:-translate-y-1 transition-all">宜蘭</button>
+                        </div>
+                    </div>
+                    <div class="flex flex-col bg-green-50/60 p-4 rounded-2xl border border-green-100/50">
+                        <div class="flex items-center mb-4">
+                            <span class="text-xs font-bold text-green-600 bg-white px-3 py-1.5 rounded-lg border border-green-100 shadow-sm"><i class="fas fa-mountain mr-1.5"></i>中部地區</span>
+                            <div class="h-px bg-gradient-to-r from-green-200 to-transparent flex-1 ml-3"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <button onclick="window.navigateToSearch('苗栗縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-green-300 hover:text-green-600 hover:-translate-y-1 transition-all">苗栗</button>
+                            <button onclick="window.navigateToSearch('台中市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-green-300 hover:text-green-600 hover:-translate-y-1 transition-all">台中</button>
+                            <button onclick="window.navigateToSearch('彰化縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-green-300 hover:text-green-600 hover:-translate-y-1 transition-all">彰化</button>
+                            <button onclick="window.navigateToSearch('南投縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-green-300 hover:text-green-600 hover:-translate-y-1 transition-all">南投</button>
+                            <button onclick="window.navigateToSearch('雲林縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-green-300 hover:text-green-600 hover:-translate-y-1 transition-all">雲林</button>
+                        </div>
+                    </div>
+                    <div class="flex flex-col bg-orange-50/60 p-4 rounded-2xl border border-orange-100/50">
+                        <div class="flex items-center mb-4">
+                            <span class="text-xs font-bold text-orange-600 bg-white px-3 py-1.5 rounded-lg border border-orange-100 shadow-sm"><i class="fas fa-sun mr-1.5"></i>南部地區</span>
+                            <div class="h-px bg-gradient-to-r from-orange-200 to-transparent flex-1 ml-3"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <button onclick="window.navigateToSearch('嘉義市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-orange-300 hover:text-orange-600 hover:-translate-y-1 transition-all">嘉義市</button>
+                            <button onclick="window.navigateToSearch('嘉義縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-orange-300 hover:text-orange-600 hover:-translate-y-1 transition-all">嘉義縣</button>
+                            <button onclick="window.navigateToSearch('台南市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-orange-300 hover:text-orange-600 hover:-translate-y-1 transition-all">台南</button>
+                            <button onclick="window.navigateToSearch('高雄市')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-orange-300 hover:text-orange-600 hover:-translate-y-1 transition-all">高雄</button>
+                            <button onclick="window.navigateToSearch('屏東縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-orange-300 hover:text-orange-600 hover:-translate-y-1 transition-all">屏東</button>
+                        </div>
+                    </div>
+                    <div class="flex flex-col bg-purple-50/60 p-4 rounded-2xl border border-purple-100/50">
+                        <div class="flex items-center mb-4">
+                            <span class="text-xs font-bold text-purple-600 bg-white px-3 py-1.5 rounded-lg border border-purple-100 shadow-sm"><i class="fas fa-water mr-1.5"></i>東部與離島</span>
+                            <div class="h-px bg-gradient-to-r from-purple-200 to-transparent flex-1 ml-3"></div>
+                        </div>
+                        <div class="grid grid-cols-2 gap-2.5">
+                            <button onclick="window.navigateToSearch('花蓮縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-purple-300 hover:text-purple-600 hover:-translate-y-1 transition-all">花蓮</button>
+                            <button onclick="window.navigateToSearch('台東縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-purple-300 hover:text-purple-600 hover:-translate-y-1 transition-all">台東</button>
+                            <button onclick="window.navigateToSearch('澎湖縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-purple-300 hover:text-purple-600 hover:-translate-y-1 transition-all">澎湖</button>
+                            <button onclick="window.navigateToSearch('金門縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-purple-300 hover:text-purple-600 hover:-translate-y-1 transition-all">金門</button>
+                            <button onclick="window.navigateToSearch('連江縣')" class="w-full bg-white border border-gray-200 text-gray-700 py-2.5 rounded-xl text-sm font-medium hover:border-purple-300 hover:text-purple-600 hover:-translate-y-1 transition-all">馬祖</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <div id="queryView" class="hidden min-h-screen flex flex-col block relative">
+        <header class="bg-blue-600 text-white p-4 shadow-lg sticky top-0 z-50">
+            <div class="max-w-4xl mx-auto flex justify-between items-center">
+                <button onclick="window.showMap()" class="p-2 hover:bg-blue-700 rounded-lg flex items-center transition font-medium">
+                    <i class="fas fa-chevron-left mr-2"></i> 返回地圖
+                </button>
+                <h1 class="text-xl font-bold flex items-center" id="selected-county-title">
+                    <i class="fas fa-store mr-2"></i> 特約商店查詢
+                </h1>
+                <div class="w-24"></div>
+            </div>
+        </header>
+
+        <main class="flex-1 max-w-4xl mx-auto p-4 w-full">
+            <section class="bg-white rounded-2xl shadow-md p-6 mb-6 border border-gray-100">
+                <div class="relative">
+                    <input type="text" id="searchInput" placeholder="請輸入商店名稱、關鍵字或地址..."
+                           class="w-full p-4 pr-28 border-2 border-blue-100 rounded-xl focus:border-blue-500 focus:outline-none text-base md:text-lg transition-colors shadow-sm">
+                    <div class="absolute right-2 top-2 flex space-x-2">
+                        <button onclick="window.startVoiceSearch('searchInput')" class="bg-blue-500 hover:bg-blue-600 text-white p-3 rounded-lg transition shadow">
+                            <i class="fas fa-microphone text-lg"></i>
+                        </button>
+                        <button class="bg-gray-100 text-gray-400 p-3 rounded-lg border border-gray-200 pointer-events-none">
+                            <i class="fas fa-search text-lg"></i>
+                        </button>
+                    </div>
+                </div>
+
+                <div id="category-tags-container" class="mt-4 flex flex-wrap gap-2 overflow-x-auto scrollbar-hide pb-2"></div>
+
+                <p class="mt-4 text-sm text-gray-500 border-t pt-4 flex justify-between items-center">
+                    <span>
+                        <i class="fas fa-map-marker-alt text-red-500 mr-1"></i> 目前查詢：<span id="hintCity" class="font-bold text-blue-700 text-base ml-1">全台</span>
+                    </span>
+                    <span id="total-count" class="font-medium text-gray-500"></span>
+                </p>
+            </section>
+
+            <div id="store-list-container" class="grid grid-cols-1 md:grid-cols-2 gap-5 mb-6"></div>
+            
+            <div id="load-more-container" class="hidden text-center mt-6 mb-8">
+                <button id="load-more-btn" class="bg-gray-800 hover:bg-gray-900 text-white py-3 px-10 rounded-xl font-bold transition shadow-md flex items-center justify-center mx-auto">
+                    查看更多資料 <i class="fas fa-arrow-down ml-2"></i>
+                </button>
+            </div>
+        </main>
+    </div>
+
+    <div id="quickSearchModal" class="hidden fixed inset-0 bg-gray-900 bg-opacity-50 backdrop-blur-sm z-[130] flex items-start justify-center pt-24 transition-opacity">
+        <div class="bg-white rounded-3xl p-6 w-11/12 max-w-md shadow-2xl relative animate-pop-up">
+            <button onclick="window.closeQuickSearch()" class="absolute top-4 right-4 text-gray-400 hover:text-gray-700 transition p-2">
+                <i class="fas fa-times text-xl"></i>
+            </button>
+            <h3 class="text-xl font-bold text-gray-800 mb-4 flex items-center">
+                <i class="fas fa-search text-blue-500 mr-2"></i> 全域快速搜尋
+            </h3>
+            <div class="relative flex items-center mb-5">
+                <input type="text" id="quickSearchInput" placeholder="請輸入全台商店名稱或關鍵字..."
+                       class="w-full p-4 pr-16 border-2 border-blue-100 rounded-xl focus:border-blue-500 focus:outline-none text-base transition-colors shadow-sm"
+                       onkeypress="if(event.key === 'Enter') window.executeQuickSearch()">
+                <div class="absolute right-2 flex space-x-1">
+                    <button onclick="window.startVoiceSearch('quickSearchInput')" class="bg-blue-500 hover:bg-blue-600 text-white p-2.5 rounded-lg transition shadow">
+                        <i class="fas fa-microphone"></i>
+                    </button>
+                </div>
+            </div>
+            <button onclick="window.executeQuickSearch()" class="w-full bg-gray-800 hover:bg-gray-900 text-white py-3 rounded-xl font-bold transition shadow-md flex justify-center items-center">
+                開始跨縣市搜尋 <i class="fas fa-arrow-right ml-2"></i>
+            </button>
+        </div>
+    </div>
+
+    <div id="voiceOverlay" class="hidden fixed inset-0 bg-black bg-opacity-60 backdrop-blur-sm flex items-center justify-center z-[150] transition-opacity">
+        <div class="bg-white rounded-3xl p-8 text-center max-w-sm w-full mx-4 shadow-2xl">
+            <div class="w-24 h-24 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-6 voice-pulse">
+                <i class="fas fa-microphone text-4xl"></i>
+            </div>
+            <h3 class="text-2xl font-bold text-gray-800 mb-2">正在聆聽...</h3>
+            <p id="speechTranscript" class="text-gray-500 text-lg h-8 mt-2">請允許麥克風權限並開始說話</p>
+            
+            <div class="mt-8 flex justify-center space-x-4">
+                <button id="voiceCancelBtn" onclick="window.closeVoiceSearch()" class="px-6 py-2.5 text-gray-500 hover:text-gray-700 bg-gray-100 hover:bg-gray-200 rounded-xl transition-colors font-medium">取消</button>
+                <button id="voiceDoneBtn" onclick="window.finishVoiceSearch()" class="hidden px-6 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl transition-colors shadow-md font-medium">
+                    <i class="fas fa-check mr-1"></i> 說完了
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <button id="backToTopBtn" onclick="window.scrollTo({top: 0, behavior: 'smooth'})" class="fixed bottom-24 right-5 bg-blue-600 text-white w-12 h-12 rounded-full shadow-lg flex items-center justify-center text-xl transition-all duration-300 opacity-0 pointer-events-none z-[100] hover:bg-blue-700 hover:-translate-y-1">
+        <i class="fas fa-arrow-up"></i>
+    </button>
+
+    <nav class="fixed bottom-0 w-full bg-white border-t border-gray-200 py-2 flex justify-around items-center z-50 shadow-[0_-5px_15px_rgba(0,0,0,0.05)]">
+        <button onclick="window.showMap()" id="nav-map" class="flex flex-col items-center text-blue-600 p-2 w-full transition-transform hover:scale-105">
+            <i class="fas fa-home text-xl mb-1"></i>
+            <span class="text-[11px] font-bold">首頁地圖</span>
+        </button>
+        <button onclick="window.openQuickSearch()" id="nav-search" class="flex flex-col items-center text-gray-400 hover:text-blue-500 p-2 w-full transition-transform hover:scale-105">
+            <i class="fas fa-search text-xl mb-1"></i>
+            <span class="text-[11px] font-bold">快速搜尋</span>
+        </button>
+        <button onclick="alert('收藏列表功能開發中')" class="flex flex-col items-center text-gray-400 hover:text-blue-500 p-2 w-full transition-transform hover:scale-105">
+            <i class="fas fa-heart text-xl mb-1"></i>
+            <span class="text-[11px] font-bold">收藏列表</span>
+        </button>
+    </nav>
+
+    <div id="ttsStatus" class="fixed bottom-28 left-1/2 transform -translate-x-1/2 bg-gray-800 text-white px-6 py-3 rounded-full text-sm font-medium shadow-2xl opacity-0 transition-opacity duration-300 pointer-events-none z-[110] flex items-center border border-gray-600">
+        <i class="fas fa-volume-up mr-3 text-blue-400 animate-pulse text-lg"></i>
+        <span class="font-medium tracking-wide">正在使用語音朗讀中...</span>
+    </div>
+
+    <script type="module" src="./js/main.js"></script>
+</body>
+</html>
