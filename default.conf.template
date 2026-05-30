@@ -1,0 +1,59 @@
+# 1. 🌟 定義自訂的 Debug Log 格式 (必須放在 server 區塊之外)
+log_format debug_trace '🎯 [請求追蹤] '
+                       '1.前端來訪路徑="$request_uri" | '
+                       '2.轉發目標 Azure IP="$upstream_addr" | '
+                       '3.Azure回傳狀態碼="$upstream_status" | '
+                       '4.給前端的最終狀態="$status" | '
+                       '耗時="$request_time"秒';
+
+server {
+    listen       80;
+    listen  [::]:80;
+    server_name  localhost;
+
+    # 2. 🌟 啟用自訂的 Debug Log
+    access_log /var/log/nginx/access.log debug_trace;
+    
+    # 關閉絕對重定向，防止跳出內部 IP
+    absolute_redirect off;
+
+    # 前端靜態檔案位置
+    location / {
+        root   /usr/share/nginx/html;
+        index  index.html index.htm;
+        try_files $uri $uri/ /index.html;
+    }
+
+    # 商店搜尋 API 反向代理
+    location /api/tw_search {
+        proxy_pass ${SEARCH_API_URL};
+        
+        # 開啟 SNI (這非常關鍵，請確保有這行)
+        proxy_ssl_server_name on;
+        proxy_redirect off;
+        
+        proxy_set_header Host $proxy_host; 
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 語音辨識 API 反向代理
+    location /api/speech_to_text {
+        proxy_pass ${SPEECH_API_URL};
+        
+        proxy_ssl_server_name on;
+        proxy_redirect off;
+        
+        proxy_set_header Host $proxy_host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # 錯誤頁面處理
+    error_page   500 502 503 504  /50x.html;
+    location = /50x.html {
+        root   /usr/share/nginx/html;
+    }
+}

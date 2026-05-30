@@ -24,8 +24,8 @@ const categoryImages = {
     'default': './img/default.png' // 預設圖片防呆機制 / Fallback default image
 };
 
-// Azure Functions 本地測試 API 端點 / Local Azure Functions API Endpoint
-const API_URL = 'http://localhost:7071/api/tw_search';
+import { CONFIG } from './config.js';
+const API_URL = CONFIG.SEARCH_ENDPOINT; // 改用 config 的動態設定
 
 /**
  * 從 API 取得商店資料 / Fetch store data from API
@@ -34,7 +34,8 @@ const API_URL = 'http://localhost:7071/api/tw_search';
  */
 export async function fetchStoresAPI({ county = '', keyword = '', category = '全部', page = 1 }) {
     try {
-        const url = new URL(API_URL);
+        // 🌟 修正：補上 window.location.origin 作為 Base URL
+        const url = new URL(API_URL, window.location.origin);
         
         // 建立 Query String / Build query string
         if (county && county !== '全台') url.searchParams.append('county', county);

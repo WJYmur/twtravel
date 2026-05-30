@@ -2,9 +2,8 @@ let voiceTargetInputId = 'searchInput';
 let recorder;
 let microphone;
 
-// 語音辨識 API 端點路由 (Azure Functions 本地測試) 
-// Speech-to-Text API Endpoint (Azure Functions local dev)
-const SPEECH_API_URL = 'http://localhost:7072/api/speech_to_text';
+import { CONFIG } from './config.js';
+const SPEECH_API_URL = CONFIG.SPEECH_ENDPOINT; // 改用 config 的動態設定
 
 /**
  * 啟動語音辨識與錄音 / Start voice search recording
